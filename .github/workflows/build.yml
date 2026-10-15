@@ -1,0 +1,83 @@
+name: Build AmigaUnicode68k
+
+on:
+  push:
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  host-tests:
+    name: UTF-8 and FreeType validation on Linux
+    runs-on: ubuntu-24.04
+    timeout-minutes: 15
+    steps:
+      - name: Check out source
+        uses: actions/checkout@v4
+      - name: Install host dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libfreetype-dev fonts-dejavu-core
+      - name: Validate strict UTF-8 decoding
+        run: make selftest
+      - name: Compile and run shared FreeType renderer
+        run: |
+          make host
+          ./font-preview /usr/share/fonts/truetype/dejavu/DejaVuSans.ttf preview.pgm
+          python3 tests/check_pgm.py preview.pgm
+      - name: Save rendering test output
+        uses: actions/upload-artifact@v4
+        with:
+          name: host-greek-unicode-preview
+          path: preview.pgm
+          retention-days: 14
+
+  amigaos-cross-build:
+    name: Cross-compile AmigaOS 3.x (68040 and 68060)
+    needs: host-tests
+    runs-on: ubuntu-24.04
+    timeout-minutes: 90
+    env:
+      TOOLCHAIN_PREFIX: /tmp/amiga-toolchain
+    steps:
+      - name: Check out project
+        uses: actions/checkout@v4
+      - name: Install GNU toolchain build prerequisites
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential git make curl g++ flex bison gettext autoconf \
+            automake rsync libreadline-dev libgmp-dev libmpfr-dev \
+            libmpc-dev texinfo xz-utils pkg-config
+      - name: Bootstrap AmigaPorts GCC and FreeType
+        run: |
+          set -euo pipefail
+          git clone --depth=1 https://github.com/AmigaPorts/m68k-amigaos-gcc.git "$RUNNER_TEMP/m68k-amigaos-gcc"
+          cd "$RUNNER_TEMP/m68k-amigaos-gcc"
+          make update
+          make -j"$(nproc)" all PREFIX="$TOOLCHAIN_PREFIX"
+          make -j"$(nproc)" zlib PREFIX="$TOOLCHAIN_PREFIX"
+          make -j"$(nproc)" libfreetype2 PREFIX="$TOOLCHAIN_PREFIX"
+      - name: Compile both native targets
+        run: |
+          set -euo pipefail
+          export PATH="$TOOLCHAIN_PREFIX/bin:$PATH"
+          mkdir -p dist/68040 dist/68060
+          make amiga CPU=68040
+          cp AmigaUnicode68k dist/68040/AmigaUnicode68k
+          make clean
+          make amiga CPU=68060
+          cp AmigaUnicode68k dist/68060/AmigaUnicode68k
+          test -s dist/68040/AmigaUnicode68k
+          test -s dist/68060/AmigaUnicode68k
+          file dist/68040/AmigaUnicode68k dist/68060/AmigaUnicode68k
+      - name: Save native executable artifacts (not yet hardware-tested)
+        uses: actions/upload-artifact@v4
+        with:
+          name: amigaos3-68040-68060-UNTESTED
+          path: dist/
+          if-no-files-found: error
+          retention-days: 14
