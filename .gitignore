@@ -1,0 +1,11 @@
+# Local executables, image previews and build products
+/AmigaUnicode68k
+/font-preview
+/utf8-selftest
+/preview.pgm
+/*.pgm
+/dist/
+# Editor/OS
+.DS_Store
+*.swp
+*~
